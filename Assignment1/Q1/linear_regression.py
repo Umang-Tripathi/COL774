@@ -9,12 +9,17 @@ import numpy as np
 class LinearRegressor:
     def __init__(self):
 
-        self.theta = None
-        self.time_interval = 0.02
+        self.theta = None # Parameters of the model
+
+        self.max_iter = 1000000 # Maximum number of iterations
+
+        self.tol = 1e-7 # Convergence criterion
+
+        self.iterations = None # Number of iterations until convergence
 
         pass
     
-    def fit(self, X, y, learning_rate=0.01):
+    def fit(self, X, y, learning_rate=1.0):
         """
         Fit the linear regression model to the data using Gradient Descent.
         
@@ -31,59 +36,41 @@ class LinearRegressor:
             
         Returns
         -------
-        List of Parameters: numpy array of shape (n_iter, n_features,)
+        List of Parameters: numpy array of shape (n_iter, n_features + 1,)
             The list of parameters obtained after each iteration of Gradient Descent.
         """
 
-        # Added intercept term (1) so that feature matrix X is m x 2
-        X = np.hstack((np.ones((m, 1)), X)) 
+        m, n = X.shape
+        X = np.c_[np.ones(m), X]  # Add intercept term
+        self.theta = np.zeros(n + 1)  # Initialize parameters
 
-        # Initialize theta to zeros
-        self.theta = np.zeros((X.shape[1], 1))
+        params_list = []
+        params_list.append(self.theta.copy())
+        prev_cost = float('inf')
 
-        # Number of training examples
-        m = len(y)
-        n = X.shape[1]
+        
+        Itr = 0
+        while Itr < self.max_iter:
+            Itr += 1
 
-        # List to store the parameters after each iteration
-        theta_list = []
-        J_theta_list = []
-        gradient_list = []
-        prev_J_theta = float('inf')
-
-        start_time = time.time()
-        while True:
-            # Compute the predictions : ( h_theta(x(i)) )
-            predictions = X.dot(self.theta)
-
-            # Compute the error : ( y(i) - h_theta(x(i)) )
+            predictions = X @ self.theta  # Compute predictions
             error = predictions - y
+            gradient = (X.T @ error) / m  # Compute gradient
+            self.theta -= learning_rate * gradient  # Update parameters
 
-            # Compute the gradient : gradient = (1/m) sum ( h_theta(x(i)) - y(i) ) * x(i)
-            gradient = (1 / m) * X.T.dot(error)
+            # Compute cost
+            cost = (error @ error) / (2 * m)
+            params_list.append(self.theta.copy())
 
-            # Update theta :  theta(t+1) = theta(t) - learning_rate * gradient
-            self.theta = self.theta - learning_rate * gradient
-
-            # Compute J_theta
-            J_theta = (1 / (2 * m)) * np.sum(error ** 2)
-            if ( time.time() - start_time > self.time_interval):
-                J_theta_list.append()
-                start_time = time.time()
-                
-
-            # Store the theta
-            theta_list.append(self.theta)
-
-            # Check convergence condition
-            if abs(J_theta - prev_J_theta) < 1e-9:
+            # Check convergence
+            if abs(prev_cost - cost) < self.tol:
                 break
+            prev_cost = cost
 
-            # Update prev_J_theta
-            prev_J_theta = J_theta
+        self.iterations = Itr
 
-        return theta_list
-
+        return np.array(params_list)
+        
         pass
     
     def predict(self, X):
@@ -101,12 +88,15 @@ class LinearRegressor:
             The predicted target values.
         """
 
-        y_pred = X.dot(self.theta)
+        m = X.shape[0]
+        X = np.c_[np.ones(m), X]  # Add intercept term
 
-        return y_pred
-    
-    
-    
+
+        return X @ self.theta  # Compute predictions
+
+        pass
+
+
 
 
 
