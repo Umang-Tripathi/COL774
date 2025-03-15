@@ -1,73 +1,91 @@
 import numpy as np
+import pandas as pd
+from collections import defaultdict
 
 class NaiveBayes:
     def __init__(self):
 
-        self.vocabulary = dict()
-        self.class_prob = []
-        self.word_prob = []
-        self.smoothening = 0.0
-        self.class_count = []
-        self.word_count = []
-        self.total_word_count = 0
-        self.total_class_count = 0
-       
+        self.class_priors = {}  # log(P(y=k)) = log (phi_k)
+        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w | y)
+        self.vocab = set() # set of all unique words
+        self.class_counts = defaultdict(int) # count of each class ; ( sigma 1{y(i)=k} )
+        self.total_words_per_class = defaultdict(int) # total number of words in each class { sigma 1{y(i)=k} * |x(i)| }
+        self.alpha = 1.0  # Default Laplace smoothing parameter
 
-        pass
+    def fit(self, df, smoothening, class_col="Class Index", text_col="Tokenized Description"):
+        """
+        Learn the parameters of the model from the training data.
         
-    def token_id(self, token):
-
-        # Check if the word is in the vocabulary
-        if token in self.vocabulary.keys():
-            return self.vocabulary[token]
-        else:
-
-            #assign the unknown token to the last index
-            self.vocabulary[token] = len(self.vocabulary)
-            return len(self.vocabulary)-1
-        
-        return -1
-
-    def tokenizer(self,text):
-
-        # Tokenize the text
-        tokens = text.split()
-
-        # Remove punctuation
-        tokens = [word.strip('.,') for word in tokens]
-
-        # Remove special characters
-        tokens = [word for word in tokens if word.isalnum()]
-
-        # Lowercase all words
-        tokens = [word.lower() for word in tokens]
-
-        # convert to token ids
-        tokens = [self.token_id(word) for word in tokens]
-
-        return tokens
-
-    
-    def fit(self, df, smoothening, class_col = "Class Index", text_col = "Tokenized Description"):
-        """Learn the parameters of the model from the training data.
-        Classes are 1-indexed
-
         Args:
-            df (pd.DataFrame): The training data containing columns class_col and text_col.
-                each entry of text_col is a list of tokens.
+            df (pd.DataFrame): The training data containing class_col and text_col.
             smoothening (float): The Laplace smoothening parameter.
         """
 
-
+        self.alpha = smoothening # alpha = smoothening parameter
+        m = len(df) # m = total number of samples
+        class_word_counts = defaultdict(lambda: defaultdict(int))  # word counts per class : class -> word -> count
         
-        pass
-    
-    def predict(self, df, text_col = "Tokenized Description", predicted_col = "Predicted"):
+        # class priors P(y=k) = phi_k
+        for _, row in df.iterrows():
+
+            label = row[class_col] # class label
+            words = row[text_col] # tokenized text
+            self.class_counts[label] += 1 # count of each class ; ( sigma 1{y(i)=k} )
+
+            for word in words:
+
+                class_word_counts[label][word] += 1 # count of each word in each class ; ( sigma(i=1 to m) sigma(j=1 to |x(i)| ) 1{y(i)=k} * 1{x(i)(j)=w} )
+                self.vocab.add(word) # set of all unique words
+                self.total_words_per_class[label] += 1 # total number of words in each class { sigma 1{y(i)=k} * |x(i)| }
+
+
+        self.class_priors = {cls: np.log(count / m) for cls, count in self.class_counts.items()} #log(phi_k) = log( count(y=k) / m )
+        
+
+        # log P(x(i)(j)=w_l|y(i)=k)= log(theta_l(k)) with Laplace smoothing
+        vocab_size = len(self.vocab)
+
+        for cls in self.class_counts: # for each class
+
+            total_words = self.total_words_per_class[cls] # total number of words in each class { sigma 1{y(i)=k} * |x(i)| }
+
+            for word in self.vocab: # for each word in vocab
+
+                word_count = class_word_counts[cls][word] # count of each word in each class ; ( sigma(i=1 to m) sigma(j=1 to |x(i)| ) 1{y(i)=k} * 1{x(i)(j)=w} )
+                self.word_likelihoods[cls][word] = np.log((word_count + self.alpha) / (total_words + vocab_size * self.alpha))
+                # log(theta_l(k)) = log( count(w|y=k) + 1 * alpha / total_words(y=k) + alpha * |V| )
+
+    def predict(self, df, text_col="Tokenized Description", predicted_col="Predicted"):
         """
         Predict the class of the input data by filling up column predicted_col in the input dataframe.
 
         Args:
-            df (pd.DataFrame): The testing data containing column text_col.
-                each entry of text_col is a list of tokens.
+            df (pd.DataFrame): The testing data containing text_col with tokenized text.
         """
-        pass
+        predictions = []
+
+        for _, row in df.iterrows():
+
+            words = row[text_col]
+
+            class_scores = {cls: self.class_priors[cls] for cls in self.class_counts} # log(P(y=k)|x) = ( sum(j) log(p(x(j)|y=k)) ) +  log(P(y=k))
+
+            for cls in class_scores:
+
+                for word in words:
+                    if word in self.vocab:
+
+                        class_scores[cls] += self.word_likelihoods[cls][word]  
+                        # log(P(x| y)) = log(P( x(1)| y)) + log(P(x(2)| y)) + ... + log(theta_l(k))
+
+                    else :
+
+                        self.vocab.add(word)
+                        self.word_likelihoods[cls][word] = np.log(self.alpha / (self.total_words_per_class[cls] + len(self.vocab) * self.alpha))
+
+                        class_scores[cls] += self.word_likelihoods[cls][word]
+                        # log(P(x| y)) = log(P( x(1)| y)) + log(P(x(2)| y)) + ... + log(alpha / (total_words(y) + |V| * alpha))
+                        
+            predictions.append(max(class_scores, key=class_scores.get))  # prediction = argmax_k P(y=k | x)
+
+        df[predicted_col] = predictions
