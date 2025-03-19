@@ -5,8 +5,8 @@ from collections import defaultdict
 class NaiveBayes:
     def __init__(self):
 
-        self.class_priors = {}  # log(P(y=k)) = log (phi_k)
-        self.word_likelihoods = defaultdict(lambda: defaultdict(float))  # P(w | y)
+        self.phi = {}  # log(P(y=k)) = log (phi_k)
+        self.theta = defaultdict(lambda: defaultdict(float))  #  class -> word -> log(prob)
         self.vocab = set() # set of all unique words
         self.class_counts = defaultdict(int) # count of each class ; ( sigma 1{y(i)=k} )
         self.total_words_per_class = defaultdict(int) # total number of words in each class { sigma 1{y(i)=k} * |x(i)| }
@@ -39,7 +39,7 @@ class NaiveBayes:
                 self.total_words_per_class[label] += 1 # total number of words in each class { sigma 1{y(i)=k} * |x(i)| }
 
 
-        self.class_priors = {cls: np.log(count / m) for cls, count in self.class_counts.items()} #log(phi_k) = log( count(y=k) / m )
+        self.phi = {cls: np.log(count / m) for cls, count in self.class_counts.items()} #log(phi_k) = log( count(y=k) / m )
         
 
         # log P(x(i)(j)=w_l|y(i)=k)= log(theta_l(k)) with Laplace smoothing
@@ -52,7 +52,7 @@ class NaiveBayes:
             for word in self.vocab: # for each word in vocab
 
                 word_count = class_word_counts[cls][word] # count of each word in each class ; ( sigma(i=1 to m) sigma(j=1 to |x(i)| ) 1{y(i)=k} * 1{x(i)(j)=w} )
-                self.word_likelihoods[cls][word] = np.log((word_count + self.alpha) / (total_words + vocab_size * self.alpha))
+                self.theta[cls][word] = np.log((word_count + self.alpha) / (total_words + vocab_size * self.alpha))
                 # log(theta_l(k)) = log( count(w|y=k) + 1 * alpha / total_words(y=k) + alpha * |V| )
 
     def predict(self, df, text_col="Tokenized Description", predicted_col="Predicted"):
@@ -68,22 +68,20 @@ class NaiveBayes:
 
             words = row[text_col]
 
-            class_scores = {cls: self.class_priors[cls] for cls in self.class_counts} # log(P(y=k)|x) = ( sum(j) log(p(x(j)|y=k)) ) +  log(P(y=k))
+            class_scores = {cls: self.phi[cls] for cls in self.class_counts} # log(P(y=k)|x) = ( sum(j) log(p(x(j)|y=k)) ) +  log(P(y=k))
 
             for cls in class_scores:
 
                 for word in words:
                     if word in self.vocab:
 
-                        class_scores[cls] += self.word_likelihoods[cls][word]  
+                        class_scores[cls] += self.theta[cls][word]  
                         # log(P(x| y)) = log(P( x(1)| y)) + log(P(x(2)| y)) + ... + log(theta_l(k))
 
                     else :
 
-                        self.vocab.add(word)
-                        self.word_likelihoods[cls][word] = np.log(self.alpha / (self.total_words_per_class[cls] + len(self.vocab) * self.alpha))
+                        self.theta[cls][word] = np.log(self.alpha / (self.total_words_per_class[cls] + len(self.vocab) * self.alpha))
 
-                        class_scores[cls] += self.word_likelihoods[cls][word]
                         # log(P(x| y)) = log(P( x(1)| y)) + log(P(x(2)| y)) + ... + log(alpha / (total_words(y) + |V| * alpha))
                         
             predictions.append(max(class_scores, key=class_scores.get))  # prediction = argmax_k P(y=k | x)
